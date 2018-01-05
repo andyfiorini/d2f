@@ -1,0 +1,276 @@
+groups:
+- name: main
+  jobs:
+    - regulator
+    - build-app
+    - unit-test-app
+    - deploy-to-staging
+    - integration-test
+    - smoke-test-staging
+    - end-to-end-test-staging
+    - deploy-to-staging-nv
+    - smoke-test-staging-nv
+    - end-to-end-test-staging-nv
+    - bg-deployment-to-prod
+    - smoke-test-prod
+    - end-to-end-test-prod
+
+
+- name: staging
+  jobs:
+    - regulator
+    - build-app
+    - unit-test-app
+    - integration-test
+    - deploy-to-staging
+    - smoke-test-staging
+    - end-to-end-test-staging
+
+- name: staging-next-version
+  jobs:
+    - regulator
+    - build-app
+    - unit-test-app
+    - integration-test
+    - deploy-to-staging-nv
+    - smoke-test-staging-nv
+    - end-to-end-test-staging-nv
+
+- name: blue-green-to-prod
+  jobs:
+    - regulator
+    - build-app
+    - unit-test-app
+    - integration-test
+    - bg-deployment-to-prod
+    - smoke-test-prod
+    - end-to-end-test-prod
+
+resources:
+- name: pipeline-repo
+  type: git
+  check: 1m
+  source:
+    uri: https://github.com/andyfiorini/d2f.git
+    branch: master
+
+- name: application
+  type: git
+  source:
+    uri: https://github.com/andyfiorini/spring-music-d2f
+
+- name: built-application
+  type: s3
+  source:
+    bucket: tempdevopss3 
+    regexp: built-app/spring-music-bin-(.*).tar.gz
+    endpoint: https://tempdevopss3.s3-sa-east-1.amazonaws.com
+    access_key_id: {{ACCESS-KEY}}
+    secret-access_key: {{SECRET}}
+    region_name: sa-east-1
+    disable_ssl: true
+    skip_ssl_verification: true
+
+- name: deployment-data
+  type: s3
+  source:
+    bucket: tempdevopss3
+    regexp: deployment-data/deployment-data-(.*).txt
+    endpoint: https://tempdevopss3.s3-sa-east-1.amazonaws.com
+    access_key_id: {{ACCESS-KEY}}
+    secret-access_key: {{SECRET}}
+    region_name: sa-east-1
+    disable_ssl: true
+    skip_ssl_verification: true
+
+- name: 5minutes_timer
+  type: time
+  source: {interval: 5m}
+
+
+jobs:
+- name: regulator
+  plan:
+  - get: pipeline-repo
+  #  trigger: true
+  - get: 5minutes_timer
+    trigger: true
+  - get: application
+    trigger: true
+#  - task: find
+#    file: pipeline-repo/ci/tasks/find-and-fetch.yml
+
+- name: build-app
+  plan:
+  - aggregate:
+    - get: pipeline-repo
+      trigger: true
+      passed: [regulator]
+    - get: application
+      passed: [regulator]
+  - task: build
+    file: pipeline-repo/ci/tasks/build.yml
+  - put: built-application
+    params: {file: built-app/spring-music*.tar.gz}
+
+- name: unit-test-app
+  plan:
+  - aggregate:
+    - get: pipeline-repo
+      trigger: true
+#      passed: [build-app]
+    - get: built-application
+      trigger: false
+      passed: [build-app]
+  - task: run-app-test
+    file: pipeline-repo/ci/tasks/unit-test-app.yml
+
+- name: integration-test
+  plan:
+  - aggregate:
+    - get: pipeline-repo
+      trigger: true
+#      passed: [build-app]
+#      passed: [unit-test-app]
+    - get: built-application
+      trigger: false
+      passed: [build-app]
+  - task: run-app-test
+    file: pipeline-repo/ci/tasks/integration-test-f1.yml
+
+- name: deploy-to-staging
+  plan:
+  - aggregate:
+    - get: built-application
+      trigger: false
+      passed: [build-app]
+      passed: [unit-test-app]
+      passed: [integration-test]
+    - get: pipeline-repo
+      trigger: true
+#      passed: [unit-test-app]
+#      passed: [integration-test]
+  - task: deploy
+    file: pipeline-repo/ci/tasks/deploy-f1.yml
+  - put: deployment-data
+    params: {file: outputs/deployment-data-f1.txt}
+
+- name: smoke-test-staging
+  plan:
+  - aggregate:
+    - get: deployment-data
+      passed: [deploy-to-staging]
+    - get: pipeline-repo
+      trigger: true
+#      passed: [deploy-to-staging]
+  - task: run-app-test
+    file: pipeline-repo/ci/tasks/smoke-test-f1.yml
+
+- name: end-to-end-test-staging
+  plan:
+  - aggregate:
+    - get: pipeline-repo
+      trigger: true
+#      passed: [deploy-to-staging]
+      passed: [smoke-test-staging]
+    - get: deployment-data
+      trigger: false
+      passed: [deploy-to-staging]
+  - task: run-app-test
+    file: pipeline-repo/ci/tasks/end-to-end-test-f1.yml
+
+################################################################
+- name: deploy-to-staging-nv
+  plan:
+  - aggregate:
+    - get: pipeline-repo
+  #    trigger: true
+#      passed: [unit-test-app]
+      passed: [integration-test]
+    - get: built-application
+      passed: [build-app]
+      passed: [unit-test-app]
+      passed: [integration-test]
+  - task: deploy
+    file: pipeline-repo/ci/tasks/deploy-f2.yml
+  - put: deployment-data
+    params: {file: outputs/deployment-data-f2.txt}
+
+- name: smoke-test-staging-nv
+  plan:
+  - aggregate:
+    - get: deployment-data
+      passed: [deploy-to-staging-nv]
+    - get: pipeline-repo
+      trigger: true
+#      passed: [deploy-to-staging-nv]
+  - task: run-app-test
+    file: pipeline-repo/ci/tasks/smoke-test-f2.yml
+
+- name: end-to-end-test-staging-nv
+  plan:
+  - aggregate:
+    - get: pipeline-repo
+      trigger: true
+#      passed: [deploy-to-staging-nv]
+#      passed: [smoke-test-staging-nv]
+    - get: deployment-data
+      trigger: false
+      passed: [deploy-to-staging-nv]
+  - task: run-app-test
+    file: pipeline-repo/ci/tasks/end-to-end-test-f2.yml
+
+################################################################
+- name: bg-deployment-to-prod
+  plan:
+  - aggregate:
+    - get: pipeline-repo
+  #    trigger: true
+      passed: [unit-test-app]
+      passed: [integration-test]
+    - get: built-application
+      passed: [build-app]
+      passed: [unit-test-app]
+      passed: [integration-test]
+  - task: deploy
+    file: pipeline-repo/ci/tasks/deploy-prod.yml
+    params: 
+      CF_API_ENDPOINT: {{CF_API_ENDPOINT}}
+      CF_USER: {{CF_USER}}
+      CF_PASSWORD: {{CF_PASSWORD}}
+      CF_ORG: {{CF_ORG}}
+      CF_SPACE: {{CF_SPACE}}
+      APP_NAME: {{APP_NAME}}
+      BUILD_NUMBER: {{BUILD_NUMBER}}
+      APP_MEMORY: {{APP_MEMORY}}
+      CF_INTERNAL_APPS_DOMAIN: {{CF_INTERNAL_APPS_DOMAIN}}
+      ARTIFACT_PATH: {{ARTIFACT_PATH}}
+      PUSH_OPTIONS: {{PUSH_OPTIONS}}
+      EXTERNAL_APP_HOSTNAME: {{EXTERNAL_APP_HOSTNAME}}
+  - put: deployment-data
+    params: {file: outputs/deployment-data-prod.txt}
+
+- name: smoke-test-prod
+  plan:
+  - aggregate:
+    - get: deployment-data
+      passed: [bg-deployment-to-prod]
+    - get: pipeline-repo
+      trigger: true
+      passed: [bg-deployment-to-prod]
+  - task: run-app-test
+    file: pipeline-repo/ci/tasks/smoke-test-prod.yml
+
+- name: end-to-end-test-prod
+  plan:
+  - aggregate:
+    - get: pipeline-repo
+      trigger: true
+      passed: [bg-deployment-to-prod]
+      passed: [smoke-test-prod]
+    - get: deployment-data
+      trigger: false
+      passed: [bg-deployment-to-prod]
+  - task: run-app-test
+    file: pipeline-repo/ci/tasks/end-to-end-test-prod.yml
+

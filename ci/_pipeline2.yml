@@ -1,0 +1,123 @@
+groups:
+- name: main
+  jobs:
+    - find-new-version
+    - build-app
+    - deploy-app-f1
+    - smoke-test-f1
+    - in-depth-test-f1
+    - deploy-app-f2
+    - smoke-test-f2
+    - in-depth-test-f2
+
+- name: foundation_1
+  jobs:
+    - find-new-version
+    - build-app
+    - deploy-app-f1
+    - smoke-test-f1
+    - in-depth-test-f1
+
+- name: foundation_2
+  jobs:
+    - find-new-version
+    - build-app
+    - deploy-app-f2
+    - smoke-test-f2
+    - in-depth-test-f2
+
+resources:
+- name: pipeline-repo
+  type: git
+  check: 1m
+  source:
+    uri: https://github.com/andyfiorini/pipeline-deploy-app.git
+    branch: master
+
+- name: app
+  type: git
+  source:
+    uri: https://github.com/cloudfoundry-samples/spring-music
+ 
+jobs:
+- name: find-new-version
+  plan:
+  - get: pipeline-repo
+    trigger: true
+  - get: app
+  - task: find
+    file: pipeline-repo/ci/tasks/find-and-fetch.yml
+
+- name: build-app
+  plan:
+  - aggregate:
+    - get: pipeline-repo
+      trigger: true
+    - get: app
+      passed: [find-new-version]
+  - task: build
+    file: pipeline-repo/ci/tasks/build.yml
+
+- name: deploy-app-f1
+  plan:
+  - aggregate:
+    - get: pipeline-repo
+      trigger: true
+      passed: [build-app]
+    - get: app
+      passed: [build-app]
+  - task: deploy
+    file: pipeline-repo/ci/tasks/deploy.yml
+
+- name: smoke-test-f1
+  plan:
+  - aggregate:
+    - get: pipeline-repo
+      trigger: true
+      passed: [deploy-app-f1]
+  - task: run-app-test
+    file: pipeline-repo/ci/tasks/curl.yml
+
+- name: in-depth-test-f1
+  plan:
+  - aggregate:
+    - get: pipeline-repo
+      trigger: true
+      passed: [deploy-app-f1]
+      passed: [smoke-test-f1]
+  - task: run-app-test
+    file: pipeline-repo/ci/tasks/advanced-test.yml
+
+################################################################
+- name: deploy-app-f2
+  plan:
+  - aggregate:
+    - get: pipeline-repo
+      trigger: true
+      passed: [build-app]
+      passed: [in-depth-test-f1]
+    - get: app
+      passed: [build-app]
+  - task: deploy
+    file: pipeline-repo/ci/tasks/deploy.yml
+
+- name: smoke-test-f2
+  plan:
+  - aggregate:
+    - get: pipeline-repo
+      trigger: true
+      passed: [deploy-app-f2]
+  - task: run-app-test
+    file: pipeline-repo/ci/tasks/curl.yml
+
+- name: in-depth-test-f2
+  plan:
+  - aggregate:
+    - get: pipeline-repo
+      trigger: true
+      passed: [deploy-app-f2]
+      passed: [smoke-test-f2]
+  - task: run-app-test
+    file: pipeline-repo/ci/tasks/advanced-test.yml
+
+

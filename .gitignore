@@ -1,0 +1,4 @@
+ci/creds.yml
+ci/vars.yml
+*/jBrowserDrive/jBrowserDriver-v0.17.0/*
+*/jaunt/*
